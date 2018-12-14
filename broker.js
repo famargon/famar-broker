@@ -21,18 +21,23 @@
 var fs = require('fs');
 
 var partitionFactory = require('./commitlog/partition');
+let recordsParser = require('./commitlog/record').jsonParser;
 const constants = require('./constants');
 
 module.exports = function(properties){
 
     const DATA_PATH = properties.dataPath || constants.DEFAULT_DATA_PATH;
+    const TOPIC_STORE_NAME = "_topic_changelog";
+    const ERROR_TOPIC_MISSING = "ETM";
+    const ERROR_TOPIC_ALREADY_EXISTS = "ETAE";
 
     var topicsPool = {};
 
-    let createTopic = function({topic, partitionsCount, parameters}){
+    let createTopic = function({topic, partitionsCount, parameters}, internal){
         return new Promise((resolve, reject)=>{
             if(topicsPool[topic]){
                 reject("Topic already exists");
+                return;
             }
             if(!partitionsCount){
                 partitionsCount = 1;
@@ -45,16 +50,46 @@ module.exports = function(properties){
             };
             var topicDirectory = DATA_PATH + topic + "/";
             fs.mkdir(topicDirectory,(mkdirErr)=>{
-                if(mkdirErr)reject(mkdirErr);
+                if(mkdirErr){
+                    if(internal && mkdirErr.code === 'EEXIST'){
+                        //do nothing and load topic in memory
+                    }else{
+                        reject({code:ERROR_TOPIC_ALREADY_EXISTS, msg:mkdirErr});
+                        return;
+                    }
+                }
+                let tempPartitions = [];
+                for(let i=0; i<partitionsCount; i++){
+                    let path = topicDirectory+i+"/";
+                    let partition = partitionFactory({topic, partitionId:i, path, parameters});
+                    tempPartitions.push(partition);
+                }
+                let initResults = [];
+                for(let i=0; i<partitionsCount; i++){
+                    let res = tempPartitions[i].init();
+                    initResults.push(res);
+                }
+                Promise.all(initResults)
+                .then(()=>{
+                    topicObject.partitions = tempPartitions;
+                    topicsPool[topic] = topicObject;
+                    if(internal){
+                        resolve();
+                        return;
+                    }
+                    let topicMetadata = {topic, partitionsCount, parameters};
+                    produce({topic:TOPIC_STORE_NAME, partition:0, message:Buffer.from(JSON.stringify(topicMetadata))})
+                    .then(()=>{
+                        resolve();
+                    })
+                    .catch(err=>{
+                        reject(err);
+                    })
+                })
+                .catch(err=>{
+                    reject(err);
+                });
             });
-            for(var i=0; i<partitionsCount; i++){
-                var path = topicDirectory+i+"/";
-                var partition = partitionFactory({topic, partitionId:i, path, ...parameters});
-                partition.init().catch(err=>reject(err));
-                topicObject.partitions.push(partition);
-            }
-            topicsPool[topic] = topicObject;
-            resolve();
         });
     }
 
@@ -84,8 +119,8 @@ module.exports = function(properties){
                     partition = getRndInteger(0, topicObj.partitions.length)
                 }
                 topicObj.partitions[partition].append(message)
-                .then(()=>{
-                    resolve();
+                .then((result)=>{
+                    resolve(result);
                 })
                 .catch((err)=>{
                     reject(err);
@@ -102,11 +137,11 @@ module.exports = function(properties){
                 reject("Topic is empty");
                 return;
             }
-            if(!partition || partition<0){
+            if(partition==null || partition<0){
                 reject("Partition is missing or is not valid");
                 return;
             }
-            if(!maxBytes){
+            if(maxBytes == null){
                 maxBytes = 4096;
             }else{
                 maxBytes = new Number(maxBytes);
@@ -125,7 +160,7 @@ module.exports = function(properties){
                     reject(err);
                 });
             }else{
-                reject("Topic "+topic+" doesn't exists");
+                reject({code:ERROR_TOPIC_MISSING, msg:"Topic "+topic+" doesn't exists"});
             }
         });
     }
@@ -168,17 +203,55 @@ module.exports = function(properties){
         });
     }
 
+    let loadTopics = function(){
+        return new Promise((resolve, reject)=>{
+            fetch({topic:TOPIC_STORE_NAME, partition:0, fetchOffset:0})
+            .then(readStream=>{
+                var bufs = [];
+                readStream.on('data', function(d){ bufs.push(d); });
+                readStream.on('end', function(){
+                    var buf = Buffer.concat(bufs);
+                    let topicChangelog = recordsParser(buf);
+                    let results = [];
+                    for(let i in topicChangelog){
+                        let topicMetadata = topicChangelog[i];
+                        let creation = createTopic(topicMetadata, true);
+                        results.push(creation);
+                    }
+                    Promise.all(results)
+                    .catch(err=>reject(err))
+                    .then(()=>resolve());
+                });
+            })
+            .catch(err=>{
+                if(err.code && err.code === "EONF"){
+                    //do nothing we tried to fetch from a empty internal topic
+                    console.log("Nothing to load from "+TOPIC_STORE_NAME)
+                    resolve();
+                }else{
+                    reject(err);
+                }
+            });
+        });
+    }
+
     function initTopics(){
         return new Promise((resolve, reject)=>{
-            fs.readdir(DATA_PATH, (err, files) => {
-                if(err){
-                    reject(err);
-                    return;
+            createTopic({topic:TOPIC_STORE_NAME, partitionsCount:1}, true)
+            .catch(errCreateTopic=>{
+                let code = errCreateTopic.code;
+                if(code && code === ERROR_TOPIC_ALREADY_EXISTS){
+                    loadTopics()
+                    .then(()=>resolve())
+                    .catch(err=>reject(err));
+                }else{
+                    reject(errCreateTopic);
                 }
-                for(var file in files){
-                    
-                }
-                resolve();
+            })
+            .then(()=>{
+                loadTopics()
+                .then(()=>resolve())
+                .catch(err=>reject(err));
             });
         });
     }

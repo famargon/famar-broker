@@ -1,6 +1,6 @@
 var topicManager = require('./topic-manager');
 var recordFactory = require("./record").createRecord;
-var parseRecords = require("./record").parseRecords;
+var parseRecords = require('../commitlog/record').parseRecords;
 
 var record = recordFactory(JSON.stringify({text:"hello record"}));
 record.setOffset(0);
@@ -22,7 +22,7 @@ topicManager.add("testRecordTopic",record.buffer(),()=>{
 	    reader.on('end', function(){
 	        var buf = Buffer.concat(bufs);
 	        console.log(parseRecords(buf))
-	    })
+	    });
 	    
 	});
 	

@@ -3,7 +3,7 @@ var app = express();
 
 var brokerFactory = require('./broker');
 
-var properties = {};//TODO
+var properties = {dataPath:__dirname+"/data/"};//TODO
 
 var broker = brokerFactory(properties);
 

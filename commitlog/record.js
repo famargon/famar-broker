@@ -64,4 +64,14 @@ function parseRecords(data){
     return records;
 }
 
-module.exports = {createRecord, parseRecords}
+let jsonParser = function(data) {
+    let records = parseRecords(data);
+    let json = [];
+    for(let i in records){
+        let record = records[i];
+        json.push(JSON.parse(record.payload.toString('utf8')));
+    }
+    return json;
+}
+
+module.exports = {createRecord, parseRecords, jsonParser}

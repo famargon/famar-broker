@@ -96,7 +96,18 @@ function partitionFactory (options){
     function load(resolve, reject){
         loadSegments()
         .then(()=>{
-            resolve();
+            let initResults = [];
+            for(let i in segments){
+                let segment = segments[i];
+                initResults.push(segment.init());
+            }
+            Promise.all(initResults)
+            .then(()=>{
+                resolve();
+            })
+            .catch(err=>{
+                reject(err);
+            })
         })
         .catch((err)=>{
             reject(err);

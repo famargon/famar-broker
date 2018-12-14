@@ -46,7 +46,21 @@ module.exports = function(path, baseOffset, maxSegmentBytes){
         return nextOffset;
     }
 
+    let init = function(){
+        return new Promise((resolve, reject)=>{
+            index.init()
+            .then(()=>{
+                //TODO init segmentLength and nextOffset
+                resolve();
+            })
+            .catch(err=>{
+                reject(err);
+            });
+        });
+    }
+
     return {
+        init,
         firstOffset,
         append,
         read,
