@@ -1,0 +1,18 @@
+{
+  "name": "famar-broker",
+  "version": "1.0.0",
+  "description": "Prototype messaging broker based on kafka",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "express": "4.16.4",
+    "node-int64": "0.4.0"
+  },
+  "keywords": [
+    "kafka"
+  ],
+  "author": "famargon",
+  "license": "ISC"
+}
