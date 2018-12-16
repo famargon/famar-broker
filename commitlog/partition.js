@@ -8,6 +8,9 @@ function partitionFactory (options){
 
     const topic = options.topic;
     const partitionId = options.partitionId;
+    const partitionPath = options.path;
+    const maxSegmentBytes = options.parameters.maxSegmentBytes;
+
     let segments = [];
 
     function activeSegment(){
@@ -26,26 +29,25 @@ function partitionFactory (options){
             }
         }
         return choosen;
-        // return segments.find((segment)=>fetchOffset >= segment.firstOffset);
     }
 
     function validateOptions(resolve,reject){
-        if(!options.path){
+        if(!partitionPath){
             reject("Partition path is missing");
         }
-        if(options.path.length==0){
+        if(partitionPath.length==0){
             reject("Partition path is empty");
         }
     }
 
     function createPartitionDirectory(){
         return new Promise((resolve,reject)=>{
-            fs.mkdir(options.path,(mkdirErr)=>{
+            fs.mkdir(partitionPath,(mkdirErr)=>{
                 if(mkdirErr){
                     reject(mkdirErr);
                     return;
                 }
-                fs.open(options.path, 'r', (err, fd) => {
+                fs.open(partitionPath, 'r', (err, fd) => {
                     if(err){
                         reject(err);
                     }else{
@@ -58,7 +60,7 @@ function partitionFactory (options){
 
     function loadSegments(){
         return new Promise((resolve,reject)=>{
-            fs.readdir(options.path, (err, files) => {
+            fs.readdir(partitionPath, (err, files) => {
                 if(err){
                     reject(err);
                     return;
@@ -79,13 +81,13 @@ function partitionFactory (options){
                             return;
                         }
                         var baseOffset = file.replace(constants.LOG_FILE_SUFFIX,"");//filename is base offset
-                        var segment = segmentFactory(options.path, new Number(baseOffset))
+                        var segment = segmentFactory(partitionPath, new Number(baseOffset), maxSegmentBytes)
                         segments.push(segment);
                     }
                 }
                 if(segments.length==0){
                     //init first segment
-                    var segment = segmentFactory(options.path, 0)
+                    var segment = segmentFactory(partitionPath, 0, maxSegmentBytes)
                     segments.push(segment);
                 }
                 resolve();
@@ -117,7 +119,7 @@ function partitionFactory (options){
     function init(){
         return new Promise((resolve,reject)=>{
             validateOptions(resolve,reject);
-            fs.open(options.path, 'r', (err, fd) => {
+            fs.open(partitionPath, 'r', (err, fd) => {
                 if (err) {
                     if (err.code === 'ENOENT') {
                         createPartitionDirectory()
@@ -135,8 +137,19 @@ function partitionFactory (options){
 
     function checkSegment(){
         return new Promise((resolve,reject)=>{
-            //TODO check segment length and swap if needed to a new segment
-            resolve();
+            let active = activeSegment();
+            if(active.needsSwap()){
+                let baseOffset = active.getNextOffset();
+                var segment = segmentFactory(partitionPath, baseOffset, maxSegmentBytes);
+                segment.init()
+                .then(()=>{
+                    segments.push(segment);
+                    resolve();
+                })
+                .catch(err=>reject(err));
+            }else{
+                resolve();
+            }
         });
     }
 

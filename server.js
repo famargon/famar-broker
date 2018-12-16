@@ -19,7 +19,7 @@ app.get('/add/:topic/:message', function(req, res){
 });
 
 app.get('/read/:topic/:partition', function (req, res) {
-    broker.fetch({topic:req.params.topic, partition:new Number(req.params.partition), fetchOffset:new Number(req.query.offset), maxBytes:req.query.maxBytes})
+    broker.fetch({topic:req.params.topic, partition:req.params.partition, fetchOffset:req.query.offset, maxBytes:req.query.maxBytes})
     .then((recordsStream)=>{
         recordsStream.pipe(res);
     })

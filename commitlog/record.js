@@ -36,11 +36,56 @@ function createRecord(content){
             //
             return buffer;
         },
-        size(){
+        payloadLength(){
             return payload.length;
+        },
+        size(){
+            return HEADER_LENGTH + payload.length;
         }
     }
 
+}
+
+let parser = function(buffer){
+    // let position = 0;
+    // let offset = new Int64(buffer.slice(position, position+OFFSET_LENGTH));
+    // let size = buffer.readInt32BE(position+OFFSET_LENGTH);//lee 4bytes
+    // let payload = buffer.slice(position+HEADER_LENGTH, position+HEADER_LENGTH+size);
+    // return {record:{
+    //     offset,
+    //     size,
+    //     payload
+    // }};
+
+    let records = [];
+    let position = 0;
+    let incomplete = false;
+    do{
+        if(buffer.length<=position+HEADER_LENGTH){
+            incomplete = true;
+            break;
+        }
+        let offset = new Int64(buffer.slice(position, position+OFFSET_LENGTH));
+        let size = buffer.readInt32BE(position+OFFSET_LENGTH);//lee 4bytes
+        if(buffer.length<position+HEADER_LENGTH+size){
+            incomplete = true;
+            break;
+        }
+        let payload = buffer.slice(position+HEADER_LENGTH, position+HEADER_LENGTH+size);
+        records.push({
+            offset,
+            size,
+            payload
+        });
+        position = position + HEADER_LENGTH + size;
+    }while(position<buffer.length);
+
+    let result = {records, incomplete};
+    if(incomplete){
+        let incompleteSlice = buffer.slice(position);
+        result.incompleteSlice = incompleteSlice;
+    }
+    return result;
 }
 
 function parseRecords(data){
@@ -74,4 +119,4 @@ let jsonParser = function(data) {
     return json;
 }
 
-module.exports = {createRecord, parseRecords, jsonParser}
+module.exports = {createRecord, parseRecords, jsonParser, parser}

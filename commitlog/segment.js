@@ -3,7 +3,7 @@ const indexFactory = require('./index');
 const constants = require("../constants");
 
 module.exports = function(path, baseOffset, maxSegmentBytes){
-    if(!maxSegmentBytes){
+    if(maxSegmentBytes == null){
         maxSegmentBytes = 5000000; //5 MBytes
     }
 
@@ -32,7 +32,7 @@ module.exports = function(path, baseOffset, maxSegmentBytes){
     }
 
     let read = function(position, bytesToRead){
-        if(!bytesToRead){
+        if(bytesToRead == null){
             bytesToRead = segmentLength-position;
         }
         return fs.createReadStream(segmentFilePath, {start:position, end:position+bytesToRead});
@@ -49,14 +49,19 @@ module.exports = function(path, baseOffset, maxSegmentBytes){
     let init = function(){
         return new Promise((resolve, reject)=>{
             index.init()
-            .then(()=>{
-                //TODO init segmentLength and nextOffset
+            .then((indexStatus)=>{
+                segmentLength = indexStatus.segmentLength;
+                nextOffset = indexStatus.nextOffset;
                 resolve();
             })
             .catch(err=>{
                 reject(err);
             });
         });
+    }
+
+    let needsSwap = function(){
+        return segmentLength>=maxSegmentBytes;
     }
 
     return {
@@ -66,7 +71,8 @@ module.exports = function(path, baseOffset, maxSegmentBytes){
         read,
         getNextOffset,
         index,
-        size
+        size,
+        needsSwap
     }
 
 }

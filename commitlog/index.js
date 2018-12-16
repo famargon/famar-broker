@@ -37,6 +37,8 @@ const indexFactory = function(path, baseOffset){
             reader.on('end', function(){
                 var buffer = Buffer.concat(bufs);
                 var position = 0;
+                let segmentLength = 0;
+                let lastOffset = 0;
                 do{
                     var intOffset = new Int64(buffer.slice(position, position+8));
                     let offset = intOffset.toNumber();
@@ -45,8 +47,11 @@ const indexFactory = function(path, baseOffset){
                     var size = buffer.readInt32BE(position+8+8);//lee 4bytes
                     cache(offset, filePosition, size);
                     position = position + indexEntrySize;
-                }while(position<buffer.length);	    
-                resolve();
+                    segmentLength += size;
+                    lastOffset = offset;
+                }while(position<buffer.length);	  
+                let nextOffset = lastOffset + 1;  
+                resolve({segmentLength, nextOffset});
             });
         });
     }
@@ -56,15 +61,15 @@ const indexFactory = function(path, baseOffset){
             fs.stat(filePath, (err)=>{
                 if(err == null) {
                     loadCache()
-                    .then(()=>{
-                        resolve();
+                    .then((status)=>{
+                        resolve(status);
                     })
                     .catch(err=>{
                         reject(err);
                     })
                 } else if(err.code === 'ENOENT') {
                     // file does not exist
-                    resolve();
+                    resolve({segmentLength:0, nextOffset:0});
                 } else {
                     reject(err);
                 }

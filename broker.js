@@ -42,6 +42,9 @@ module.exports = function(properties){
             if(!partitionsCount){
                 partitionsCount = 1;
             }
+            if(parameters==null){
+                parameters = {};
+            }
             var topicObject = {
                 topic,
                 partitionsCount,
@@ -109,14 +112,10 @@ module.exports = function(properties){
                     reject("Partition is not a valid index");
                     return;
                 }
-                if(!partition){
-                    /**
-                     * This JavaScript function always returns a random number between min (included) and max (excluded)
-                     */
-                    function getRndInteger(min, max) {
-                        return Math.floor(Math.random() * (max - min) ) + min;
-                    }
-                    partition = getRndInteger(0, topicObj.partitions.length)
+                if(partition == null){
+                    let min = 0;
+                    let max = topicObj.partitions.length;
+                    partition = Math.floor(Math.random() * (max - min) ) + min;
                 }
                 topicObj.partitions[partition].append(message)
                 .then((result)=>{
@@ -140,6 +139,14 @@ module.exports = function(properties){
             if(partition==null || partition<0){
                 reject("Partition is missing or is not valid");
                 return;
+            }else{
+               partition = new Number(partition);
+            }
+            if(fetchOffset==null || fetchOffset<0){
+                reject("fetchOffset is missing or is not valid");
+                return;
+            }else{
+                fetchOffset = new Number(fetchOffset);
             }
             if(maxBytes == null){
                 maxBytes = 4096;
