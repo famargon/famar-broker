@@ -7,13 +7,20 @@ var broker = brokerFactory(properties);
 broker.init()
 .then(()=>{
     let topic = "topic1";
-    broker.produce({topic, message:Buffer.from("test broker topic1")})
-    .then((res)=>{
-        console.log(res);
-    })
-    .catch((err)=>{
-        console.error(err);
-    });
+    let count = 1;
+    if(process.argv[2] != null){
+        count = new Number(process.argv[2]);
+    }
+
+    for(let i=0; i<count; i++){
+        broker.produce({topic, partition:0 ,message:Buffer.from("test broker topic1")})
+        .then((res)=>{
+            console.log(res);
+        })
+        .catch((err)=>{
+            console.error(err);
+        });
+    }
 
 })
 .catch((err)=>{
