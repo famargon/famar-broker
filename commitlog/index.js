@@ -27,7 +27,6 @@ const indexFactory = function(path, baseOffset){
 
     let loadCache = function(){
         return new Promise((resolve, reject)=>{
-            console.log("loading index cache");
             let reader = fs.createReadStream(filePath);
             var bufs = [];
             reader.on('error',(err)=>{
@@ -69,7 +68,7 @@ const indexFactory = function(path, baseOffset){
                     })
                 } else if(err.code === 'ENOENT') {
                     // file does not exist
-                    resolve({segmentLength:0, nextOffset:0});
+                    resolve({segmentLength:0, nextOffset:baseOffset});
                 } else {
                     reject(err);
                 }

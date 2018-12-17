@@ -19,12 +19,12 @@ module.exports = function(path, baseOffset, maxSegmentBytes){
         return new Promise((resolve, reject)=>{
             let writeStream = fs.createWriteStream(segmentFilePath, {flags:"a"});
             let recordPosition = segmentLength;
+            nextOffset++;
+            segmentLength += record.length;
             writeStream.write(record,e=>{
                 if(e){
                     reject(e);
                 }else{
-                    nextOffset++;
-                    segmentLength += record.length;
                     resolve(recordPosition);
                 }
             });

@@ -1,7 +1,8 @@
-var fs = require('fs');
-var segmentFactory = require('./segment');
-var createRecord = require('./record').createRecord;
+const fs = require('fs');
+const EventEmitter = require('events');
 
+const segmentFactory = require('./segment');
+const createRecord = require('./record').createRecord;
 const constants = require("../constants");
 
 function partitionFactory (options){
@@ -65,7 +66,8 @@ function partitionFactory (options){
                     reject(err);
                     return;
                 }
-                for(var file in files){
+                for(let i in files){
+                    let file = files[i];
                     if(file.endsWith(constants.INDEX_FILE_SUFFIX)){
                         //check if corresponding log file exists
                         let logFile = file.replace(constants.INDEX_FILE_SUFFIX, constants.LOG_FILE_SUFFIX);
@@ -87,8 +89,15 @@ function partitionFactory (options){
                 }
                 if(segments.length==0){
                     //init first segment
-                    var segment = segmentFactory(partitionPath, 0, maxSegmentBytes)
+                    var segment = segmentFactory(partitionPath, 0, maxSegmentBytes);
                     segments.push(segment);
+                }else{
+                    //sort
+                    segments = segments.sort((a,b)=>{
+                        if(a.firstOffset < b.firstOffset) {return -1}
+                        if(a.firstOffset > b.firstOffset) {return 1}
+                        return 0;
+                    });
                 }
                 resolve();
             });
@@ -135,44 +144,77 @@ function partitionFactory (options){
         });
     }
 
-    function checkSegment(){
+    let swapping = false;
+    const coordinator = new EventEmitter().setMaxListeners(0);
+    
+    function checkAndSwapSegment(){
         return new Promise((resolve,reject)=>{
             let active = activeSegment();
             if(active.needsSwap()){
-                let baseOffset = active.getNextOffset();
-                var segment = segmentFactory(partitionPath, baseOffset, maxSegmentBytes);
-                segment.init()
-                .then(()=>{
-                    segments.push(segment);
-                    resolve();
-                })
-                .catch(err=>reject(err));
+                if(swapping){
+                    let listener = (err)=>{
+                        if(err){
+                            reject(err);
+                            coordinator.removeListener('error', listener);
+                        }else{
+                            resolve();
+                            coordinator.removeListener('swapped', listener);
+                        }
+                    }
+                    coordinator.on('swapped', listener);
+                    coordinator.on('error', listener);
+                }else{
+                    swapping = true;
+                    let baseOffset = active.getNextOffset();
+                    var segment = segmentFactory(partitionPath, baseOffset, maxSegmentBytes);
+                    segment.init()
+                    .then(()=>{
+                        segments.push(segment);
+                        coordinator.emit('swapped');
+                        resolve();
+                        swapping = false;
+                    })
+                    .catch(err=>{
+                        coordinator.emit('error',err);
+                        reject(err);
+                        swapping = false;
+                    });
+                }
             }else{
                 resolve();
             }
         });
     }
 
+    let internalAppend = function(resolve, reject, message){
+        var record = createRecord(message);
+        let segment = activeSegment();
+        var offset = segment.getNextOffset();
+        record.setOffset(offset);
+        segment.append(record.buffer())
+        .then((position)=>{
+            segment.index.index(offset, position, record.size());
+            resolve({offset});
+        })
+        .catch(err=>{
+            reject(err);
+        });
+    }
+
     function append(message){
         return new Promise((resolve, reject)=>{
-            checkSegment()
-            .then(()=>{
-                var record = createRecord(message);
-                let segment = activeSegment();
-                var offset = segment.getNextOffset();
-                record.setOffset(offset);
-                segment.append(record.buffer())
-                .then((position)=>{
-                    segment.index.index(offset, position, record.size());
-                    resolve({offset});
+            let active = activeSegment();
+            if(active.needsSwap()){
+                checkAndSwapSegment()
+                .then(()=>{
+                    append(message)
+                    .then(res=>resolve(res))
+                    .catch(err=>reject(err));
                 })
-                .catch(err=>{
-                    reject(err);
-                });
-            })
-            .catch(err=>{
-                reject(err);
-            });
+                .catch(err=>reject(err));
+            }else{
+                internalAppend(resolve, reject, message);
+            }
         });
     }
 

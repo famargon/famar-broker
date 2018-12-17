@@ -1,5 +1,5 @@
 const { Transform } = require('stream');
-const recordParser = require('../commitlog/record').parser;;
+const recordParser = require('./record').parser;
 
 let recordsToJsonTransformFactory = function(){
 
@@ -7,7 +7,7 @@ let recordsToJsonTransformFactory = function(){
     const incompleteChunks = [];
 
     const recordsToJson = new Transform({
-        writableObjectMode: true,
+        // writableObjectMode: true,
 
         transform(chunk,encoding, callback){
             if(first){
@@ -48,6 +48,50 @@ let recordsToJsonTransformFactory = function(){
     return recordsToJson;
 }
 
+// let fetchTransformFactory = function(){
+
+//     const incompleteChunks = [];
+
+//     const recordsToJson = new Transform({
+//         readableObjectMode: true,
+
+//         transform(chunk, encoding, callback){
+//             let recordsChunk = chunk;
+//             if(incompleteChunks.length>0){
+//                 let swapChunks = [];
+//                 while(incompleteChunks.length !== 0){
+//                     let incomplete = incompleteChunks.shift();
+//                     swapChunks.push(incomplete);
+//                 }
+//                 swapChunks.push(chunk);
+//                 recordsChunk = Buffer.concat(swapChunks)
+//             }
+//             let result = recordParser(recordsChunk);
+//             if(result.incomplete){
+//                 incompleteChunks.push(result.incompleteSlice);
+//             }
+//             if(result.records.length>0){
+//                 let transformedArray = result.records.map(({offset, payload})=>{
+//                     let record = JSON.parse(payload.toString());
+//                     return {offset:offset.toNumber(), record};
+//                 });
+//                 this.push(transformedArray);
+//             }
+//             callback();
+//         }
+//     });
+
+//     return recordsToJson;
+// }
+
+// const objectToString = new Transform({
+//     writableObjectMode: true,
+//     transform(chunk, encoding, callback) {
+//       this.push(JSON.stringify(chunk) + '\n');
+//       callback();
+//     }
+//   });
+
 module.exports = recordsToJsonTransformFactory;
 
 
@@ -70,13 +114,7 @@ module.exports = recordsToJsonTransformFactory;
 //     callback();
 //   }
 // });
-// const objectToString = new Transform({
-//   writableObjectMode: true,
-//   transform(chunk, encoding, callback) {
-//     this.push(JSON.stringify(chunk) + '\n');
-//     callback();
-//   }
-// });
+
 // process.stdin
 //   .pipe(commaSplitter)
 //   .pipe(arrayToObject)

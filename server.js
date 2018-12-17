@@ -9,8 +9,8 @@ var broker = brokerFactory(properties);
 
 app.get('/add/:topic/:message', function(req, res){
     broker.produce({topic:req.params.topic, message:Buffer.from(req.params.message)})
-    .then(()=>{
-        res.end(req.params.message);
+    .then((produceResponse)=>{
+        res.end(JSON.stringify(produceResponse));
     })
     .catch((err)=>{
         console.error(err);
@@ -25,11 +25,11 @@ app.get('/read/:topic/:partition', function (req, res) {
     })
     .catch((err)=>{
         console.error(err);
-        res.end(new String(err));
+        res.end(JSON.stringify(err));
     })
 });
 
-app.put('/topic', function(req, res){
+app.get('/topic', function(req, res){
     broker.createTopic({topic:req.query.topic, partitionsCount:req.query.partitionsCount})
     .then(()=>{
         res.end();

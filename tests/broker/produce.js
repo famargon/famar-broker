@@ -13,7 +13,7 @@ broker.init()
     }
 
     for(let i=0; i<count; i++){
-        broker.produce({topic, partition:0 ,message:Buffer.from("test broker topic1")})
+        broker.produce({topic, partition:0, message:Buffer.from(JSON.stringify({text:"Hello broker", i}))})
         .then((res)=>{
             console.log(res);
         })

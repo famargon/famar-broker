@@ -22,6 +22,7 @@ var fs = require('fs');
 
 var partitionFactory = require('./commitlog/partition');
 let recordsParser = require('./commitlog/record').jsonParser;
+const fetchTransformStreamFactory = require('./commitlog/fetchTransformStream');
 const constants = require('./constants');
 
 module.exports = function(properties){
@@ -161,7 +162,8 @@ module.exports = function(properties){
                 }
                 topicObj.partitions[partition].read(fetchOffset, maxBytes)
                 .then((recordsStream)=>{
-                    resolve(recordsStream);
+                    let fetchTransform = fetchTransformStreamFactory();
+                    resolve(recordsStream.pipe(fetchTransform));
                 })
                 .catch((err)=>{
                     reject(err);
@@ -214,11 +216,11 @@ module.exports = function(properties){
         return new Promise((resolve, reject)=>{
             fetch({topic:TOPIC_STORE_NAME, partition:0, fetchOffset:0})
             .then(readStream=>{
-                var bufs = [];
-                readStream.on('data', function(d){ bufs.push(d); });
+                var recordsChunks = [];
+                readStream.on('data', function(d){ recordsChunks.push(d); });
                 readStream.on('end', function(){
-                    var buf = Buffer.concat(bufs);
-                    let topicChangelog = recordsParser(buf);
+                    var buf = Buffer.concat(recordsChunks);
+                    let topicChangelog = JSON.parse(buf);
                     let results = [];
                     for(let i in topicChangelog){
                         let topicMetadata = topicChangelog[i];

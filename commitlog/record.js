@@ -47,16 +47,6 @@ function createRecord(content){
 }
 
 let parser = function(buffer){
-    // let position = 0;
-    // let offset = new Int64(buffer.slice(position, position+OFFSET_LENGTH));
-    // let size = buffer.readInt32BE(position+OFFSET_LENGTH);//lee 4bytes
-    // let payload = buffer.slice(position+HEADER_LENGTH, position+HEADER_LENGTH+size);
-    // return {record:{
-    //     offset,
-    //     size,
-    //     payload
-    // }};
-
     let records = [];
     let position = 0;
     let incomplete = false;
@@ -93,7 +83,6 @@ function parseRecords(data){
     let records = [];
     let position = 0;
     do{
-        console.log("position is "+position)
         let offset = new Int64(buffer.slice(position, position+OFFSET_LENGTH));
         let size = buffer.readInt32BE(position+OFFSET_LENGTH);//lee 4bytes
         let payload = buffer.slice(position+HEADER_LENGTH, position+HEADER_LENGTH+size);
