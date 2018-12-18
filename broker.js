@@ -18,10 +18,11 @@
 
     // produce -> getTopic().getPartition().activeSegment().append(message)
 
-var fs = require('fs');
+const fs = require('fs');
+const mergeStream = require("merge-stream");
 
-var partitionFactory = require('./commitlog/partition');
-let recordsParser = require('./commitlog/record').jsonParser;
+const partitionFactory = require('./commitlog/partition');
+const recordsParser = require('./commitlog/record').jsonParser;
 const fetchTransformStreamFactory = require('./commitlog/fetchTransformStream');
 const constants = require('./constants');
 
@@ -210,32 +211,57 @@ module.exports = function(properties){
                 reject("Consumer group not found");
                 return;
             }
-            let subscriptionMetadata = group[consumerId];
+            let subscriptionMetadata = group.consumers[consumerId];
             if(subscriptionMetadata == null){
                 reject("Consumer id not found");
                 return;
             }
-            let lastCommitedOffset = subscriptionMetadata.lastCommitedOffset;
+            let assignedPartitions = subscriptionMetadata.assignedPartitions;
+            if(assignedPartitions == null){
+                reject("Consumer has no assigned partitions on this topic");
+                return;
+            }
+            assignedPartitions = Object.keys(assignedPartitions).map(partitionId=>assignedPartitions[partitionId]);
+            let fetchCounter = subscriptionMetadata.fetchCounter;
+            if(fetchCounter == null){
+                fetchCounter = 0;
+                subscriptionMetadata.fetchCounter = fetchCounter;
+            }
+            //round robin for choosing partition to fetch
+            let fetchPartition = assignedPartitions[fetchCounter % Object.keys(assignedPartitions).length];
+            subscriptionMetadata.fetchCounter ++;
+
+            let lastCommitedOffset = fetchPartition.lastCommitedOffset;
             if(lastCommitedOffset == null){
                 lastCommitedOffset = 0;
             }
-            let assignedPartitions = subscriptionMetadata.assignedPartitions;
-            if(assignedPartitions == null){
-                //TODO load balance partitions between consumers of the consumer group
-                assignedPartitions = []
-                for(let partitionId=0 ; partitionId<topicObj.partitionsCount; partitionId++){
-                    assignedPartitions.push(partitionId)
+
+            read({topic, partition:fetchPartition.id, fetchOffset:lastCommitedOffset, maxFetchBytes})
+            .then(readStream=>{
+                resolve(readStream);
+                if(group.commitPolicy === AUTO_COMMIT_POLICY){
+                    //TODO
+                    // fetchPartition.lastCommitedOffset
                 }
-            }
-            for(let partition in assignedPartitions){
-                read({topic, partition, lastCommitedOffset, maxFetchBytes});
-                //TODO 
-            }
+            })
+            .catch(err=>reject(err));
+
+            // let readResults = [];
+            // for(let partition in assignedPartitions){
+            //     readResults.push(read({topic, partition, lastCommitedOffset, maxFetchBytes}));
+            // }
+            // Promise.all(readResults)
+            // .catch(err=>reject(err))
+            // .then(readStreams=>{
+            //     let mergedReadStream = mergeStream(readStreams);
+            //     mergedReadStream.pipe()
+            // });
         });
     }
 
-    let subscribe = function({consumerGroup, consumerId, topic, commitPolicy}, internal){
+    let subscribe = function(subscriptionMetadata, internal){
         return new Promise((resolve,reject)=>{
+            let {consumerGroup, consumerId, topic, commitPolicy} = subscriptionMetadata;
             if(consumerGroup == null){
                 reject("ConsumerGroup is missing");
                 return;
@@ -267,15 +293,30 @@ module.exports = function(properties){
             }
             let group = topicSubscriptions[consumerGroup];
             if(group == null){
-                group = {};
+                group = {commitPolicy, consumers:{}};
                 topicSubscriptions[consumerGroup] = group;
             }
-            if(group[consumerId] != null){
+            if(group[consumerId] != null && !internal){
                 reject("ConsumerId "+consumerId+" already has a subscription in this topic");
                 return;
             }
-            group[consumerId] = {commitPolicy};
-            let subscriptionMetadata = {consumerGroup, consumerId, topic, commitPolicy};
+
+            if(subscriptionMetadata.assignedPartitions == null){
+                for(let auxConsumerId in group.consumers){
+                    group.consumers[auxConsumerId].assignedPartitions = {};
+                }
+                group.consumers[consumerId] = {assignedPartitions:{}};
+                let arrayConsumerIds = Object.keys(group.consumers);
+                for(let partitionId=0; partitionId < topicObj.partitionsCount; partitionId++){
+                    let consumerIndex = partitionId % arrayConsumerIds.length;
+                    let consumerAtIndex = arrayConsumerIds[consumerIndex];
+                    group.consumers[consumerAtIndex].assignedPartitions[partitionId] = {id:partitionId};
+                }
+            }else{
+                let assignedPartitions = subscriptionMetadata.assignedPartitions;
+                group.consumers[consumerId] = {assignedPartitions};
+            }
+
             if(internal){
                 resolve(subscriptionMetadata);
                 return;
@@ -438,10 +479,13 @@ module.exports = function(properties){
                 // Promise.all(initResults)
                 initTopics()
                 .then(()=>{
-                    console.log("Topics: "+JSON.stringify(topicsPool, 1, 1));
+                    console.log("----------------------------------------------------");
+                    console.log("Topics: "+JSON.stringify(topicsPool, 1, 2));
                     initSubscriptions()
                     .then(()=>{
-                        console.log("Subscriptions: "+JSON.stringify(subscriptions));
+                        console.log("----------------------------------------------------");
+                        console.log("Subscriptions: "+JSON.stringify(subscriptions, 1, 2));
+                        console.log("----------------------------------------------------");
                         resolve();
                     })
                     .catch(err=>reject(err));
@@ -455,7 +499,8 @@ module.exports = function(properties){
         init,
         createTopic,
         produce,
-        fetch: read,
+        read,
+        fetch,
         subscribe
     };
 

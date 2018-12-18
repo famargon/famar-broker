@@ -15,19 +15,35 @@ app.get('/add/:topic/:message', function(req, res){
     })
     .catch((err)=>{
         console.error(err);
-        res.end(new String(err));
-    })
+        res.end(JSON.stringify(err));
+    });
 });
 
 app.get('/read/:topic/:partition', function (req, res) {
-    broker.fetch({topic:req.params.topic, partition:req.params.partition, fetchOffset:req.query.offset, maxBytes:req.query.maxBytes})
+    broker.read({topic:req.params.topic, partition:req.params.partition, fetchOffset:req.query.offset, maxBytes:req.query.maxBytes})
     .then((recordsStream)=>{
         recordsStream.pipe(res);
     })
     .catch((err)=>{
         console.error(err);
         res.end(JSON.stringify(err));
+    });
+});
+
+app.get('/fetch/:topic', (req, res)=>{
+    let consumerGroup = req.headers['consumer-group'];
+    let consumerId = req.headers['consumer-id'];
+    let topic = req.params.topic;
+    let maxFetchBytes = req.headers['maxFetchBytes'];
+    broker.fetch({consumerGroup, consumerId, topic, maxFetchBytes})
+    .then((recordsStream)=>{
+        recordsStream.pipe(res);
     })
+    .catch((err)=>{
+        console.error(err);
+        res.end(JSON.stringify(err));
+    });
+
 });
 
 app.post('/subscription', (req, res)=>{
