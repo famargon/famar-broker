@@ -138,7 +138,7 @@ module.exports = function(properties){
         });
     }
 
-    let fetch = function({topic, partition, fetchOffset, maxBytes}){
+    let read = function({topic, partition, fetchOffset, maxBytes}){
         return new Promise((resolve,reject)=>{
             if(!topic || topic.length==0){
                 reject("Topic is empty");
@@ -181,6 +181,59 @@ module.exports = function(properties){
         });
     }
 
+    let fetch = function({consumerGroup, consumerId, topic, maxFetchBytes}){
+        return new Promise((resolve,reject)=>{
+            if(consumerGroup == null){
+                reject("ConsumerGroup is missing");
+                return;
+            }
+            if(consumerId == null){
+                reject("ConsumerId is missing");
+                return;
+            }
+            if(topic == null){
+                reject("Topic is missing");
+                return;
+            }
+            var topicObj = topicsPool[topic];
+            if(topicObj == null){
+                reject("Topic "+topic+" doesn't exists");
+                return;
+            }
+            let topicSubscriptions = subscriptions[topic];
+            if(topicSubscriptions == null){
+                reject("Topic subscription not found");
+                return;
+            }
+            let group = topicSubscriptions[consumerGroup];
+            if(group == null){
+                reject("Consumer group not found");
+                return;
+            }
+            let subscriptionMetadata = group[consumerId];
+            if(subscriptionMetadata == null){
+                reject("Consumer id not found");
+                return;
+            }
+            let lastCommitedOffset = subscriptionMetadata.lastCommitedOffset;
+            if(lastCommitedOffset == null){
+                lastCommitedOffset = 0;
+            }
+            let assignedPartitions = subscriptionMetadata.assignedPartitions;
+            if(assignedPartitions == null){
+                //TODO load balance partitions between consumers of the consumer group
+                assignedPartitions = []
+                for(let partitionId=0 ; partitionId<topicObj.partitionsCount; partitionId++){
+                    assignedPartitions.push(partitionId)
+                }
+            }
+            for(let partition in assignedPartitions){
+                read({topic, partition, lastCommitedOffset, maxFetchBytes});
+                //TODO 
+            }
+        });
+    }
+
     let subscribe = function({consumerGroup, consumerId, topic, commitPolicy}, internal){
         return new Promise((resolve,reject)=>{
             if(consumerGroup == null){
@@ -215,14 +268,14 @@ module.exports = function(properties){
             let group = topicSubscriptions[consumerGroup];
             if(group == null){
                 group = {};
-                subscriptions[consumerGroup] = group;
+                topicSubscriptions[consumerGroup] = group;
             }
             if(group[consumerId] != null){
                 reject("ConsumerId "+consumerId+" already has a subscription in this topic");
                 return;
             }
             group[consumerId] = {commitPolicy};
-            let subscriptionMetadata = {consumerGroup, consumerId, topic, commitPolicys};
+            let subscriptionMetadata = {consumerGroup, consumerId, topic, commitPolicy};
             if(internal){
                 resolve(subscriptionMetadata);
                 return;
@@ -299,7 +352,7 @@ module.exports = function(properties){
 
     let internalStoreLoader = function(internalTopicName, factory){
         return new Promise((resolve, reject)=>{
-            fetch({topic:internalTopicName, partition:0, fetchOffset:0})
+            read({topic:internalTopicName, partition:0, fetchOffset:0})
             .then(readStream=>{
                 let recordsChunks = [];
                 readStream.on('data', function(d){ recordsChunks.push(d); });
@@ -320,7 +373,7 @@ module.exports = function(properties){
             .catch(err=>{
                 if(err.code && err.code === "EONF"){
                     //do nothing we tried to fetch from a empty internal topic
-                    console.log("Nothing to load from "+TOPIC_STORE_NAME)
+                    console.log("Nothing to load from "+internalTopicName);
                     resolve();
                 }else{
                     reject(err);
@@ -385,7 +438,7 @@ module.exports = function(properties){
                 // Promise.all(initResults)
                 initTopics()
                 .then(()=>{
-                    console.log("Topics: "+JSON.stringify(topicsPool));
+                    console.log("Topics: "+JSON.stringify(topicsPool, 1, 1));
                     initSubscriptions()
                     .then(()=>{
                         console.log("Subscriptions: "+JSON.stringify(subscriptions));
@@ -402,7 +455,7 @@ module.exports = function(properties){
         init,
         createTopic,
         produce,
-        fetch,
+        fetch: read,
         subscribe
     };
 

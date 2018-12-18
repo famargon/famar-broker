@@ -1,11 +1,12 @@
-var express = require('express');
-var app = express();
+const express = require('express');
+const bodyParser = require('body-parser');
 
-var brokerFactory = require('./broker');
+const brokerFactory = require('./broker');
+let properties = {dataPath:__dirname+"/data/"};//TODO
+const broker = brokerFactory(properties);
 
-var properties = {dataPath:__dirname+"/data/"};//TODO
-
-var broker = brokerFactory(properties);
+const app = express();
+app.use(bodyParser.json());
 
 app.get('/add/:topic/:message', function(req, res){
     broker.produce({topic:req.params.topic, message:Buffer.from(req.params.message)})
@@ -29,7 +30,16 @@ app.get('/read/:topic/:partition', function (req, res) {
     })
 });
 
-app.put('/subscription', (req, res))
+app.post('/subscription', (req, res)=>{
+    broker.subscribe(req.body)
+    .then(result=>{
+        res.end(JSON.stringify(result));
+    })
+    .catch(err=>{
+        console.error(err);
+        res.end(JSON.stringify(err));
+    })
+});
 
 app.put('/topic', function(req, res){
     broker.createTopic({topic:req.query.topic, partitionsCount:req.query.partitionsCount})
