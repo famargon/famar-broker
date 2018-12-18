@@ -29,7 +29,9 @@ app.get('/read/:topic/:partition', function (req, res) {
     })
 });
 
-app.get('/topic', function(req, res){
+app.put('/subscription', (req, res))
+
+app.put('/topic', function(req, res){
     broker.createTopic({topic:req.query.topic, partitionsCount:req.query.partitionsCount})
     .then(()=>{
         res.end();

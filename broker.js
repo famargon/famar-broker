@@ -25,6 +25,10 @@ let recordsParser = require('./commitlog/record').jsonParser;
 const fetchTransformStreamFactory = require('./commitlog/fetchTransformStream');
 const constants = require('./constants');
 
+const AUTO_COMMIT_POLICY = "AUTO_COMMIT";
+const MANUAL_COMMIT_POLICY = "MANUAL_COMMIT";
+const COMMIT_POLICIES = [AUTO_COMMIT_POLICY, MANUAL_COMMIT_POLICY];
+
 module.exports = function(properties){
 
     const DATA_PATH = properties.dataPath || constants.DEFAULT_DATA_PATH;
@@ -32,7 +36,10 @@ module.exports = function(properties){
     const ERROR_TOPIC_MISSING = "ETM";
     const ERROR_TOPIC_ALREADY_EXISTS = "ETAE";
 
-    var topicsPool = {};
+    let topicsPool = {};
+
+    const SUBSCRIPTIONS_STORE_NAME = "_subscriptions_changelog";
+    let subscriptions = {};
 
     let createTopic = function({topic, partitionsCount, parameters}, internal){
         return new Promise((resolve, reject)=>{
@@ -88,7 +95,7 @@ module.exports = function(properties){
                     })
                     .catch(err=>{
                         reject(err);
-                    })
+                    });
                 })
                 .catch(err=>{
                     reject(err);
@@ -174,6 +181,63 @@ module.exports = function(properties){
         });
     }
 
+    let subscribe = function({consumerGroup, consumerId, topic, commitPolicy}, internal){
+        return new Promise((resolve,reject)=>{
+            if(consumerGroup == null){
+                reject("ConsumerGroup is missing");
+                return;
+            }
+            if(consumerId == null){
+                reject("ConsumerId is missing");
+                return;
+            }
+            if(topic == null){
+                reject("Topic is missing");
+                return;
+            }
+            var topicObj = topicsPool[topic];
+            if(topicObj == null){
+                reject("Topic "+topic+" doesn't exists");
+                return;
+            }
+            if(commitPolicy==null){
+                commitPolicy = AUTO_COMMIT_POLICY;
+            }
+            if(!COMMIT_POLICIES.includes(commitPolicy)){
+                reject("Invalid commit policy "+commitPolicy+" permitted values:"+COMMIT_POLICIES);
+                return;
+            }
+            let topicSubscriptions = subscriptions[topic];
+            if(topicSubscriptions == null){
+                topicSubscriptions = {};
+                subscriptions[topic] = topicSubscriptions;
+            }
+            let group = topicSubscriptions[consumerGroup];
+            if(group == null){
+                group = {};
+                subscriptions[consumerGroup] = group;
+            }
+            if(group[consumerId] != null){
+                reject("ConsumerId "+consumerId+" already has a subscription in this topic");
+                return;
+            }
+            group[consumerId] = {commitPolicy};
+            let subscriptionMetadata = {consumerGroup, consumerId, topic, commitPolicys};
+            if(internal){
+                resolve(subscriptionMetadata);
+                return;
+            }
+            produce({topic:SUBSCRIPTIONS_STORE_NAME, partition:0, message:Buffer.from(JSON.stringify(subscriptionMetadata))})
+            .then(()=>{
+                resolve(subscriptionMetadata);
+            })
+            .catch(err=>{
+                reject(err);
+            });
+
+        });
+    }
+
     function createDataDirectory(){
         return new Promise((resolve,reject)=>{
             fs.mkdir(DATA_PATH,(mkdirErr)=>{
@@ -212,19 +276,40 @@ module.exports = function(properties){
         });
     }
 
-    let loadTopics = function(){
+    let internalStoreInitializer = function(internalTopicName, loader){
         return new Promise((resolve, reject)=>{
-            fetch({topic:TOPIC_STORE_NAME, partition:0, fetchOffset:0})
+            createTopic({topic:internalTopicName, partitionsCount:1}, true)
+            .catch(errCreateTopic=>{
+                let code = errCreateTopic.code;
+                if(code && code === ERROR_TOPIC_ALREADY_EXISTS){
+                    loader()
+                    .then(()=>resolve())
+                    .catch(err=>reject(err));
+                }else{
+                    reject(errCreateTopic);
+                }
+            })
+            .then(()=>{
+                loader()
+                .then(()=>resolve())
+                .catch(err=>reject(err));
+            });
+        });
+    }
+
+    let internalStoreLoader = function(internalTopicName, factory){
+        return new Promise((resolve, reject)=>{
+            fetch({topic:internalTopicName, partition:0, fetchOffset:0})
             .then(readStream=>{
-                var recordsChunks = [];
+                let recordsChunks = [];
                 readStream.on('data', function(d){ recordsChunks.push(d); });
                 readStream.on('end', function(){
-                    var buf = Buffer.concat(recordsChunks);
-                    let topicChangelog = JSON.parse(buf);
+                    let buf = Buffer.concat(recordsChunks);
+                    let changelog = JSON.parse(buf);
                     let results = [];
-                    for(let i in topicChangelog){
-                        let topicMetadata = topicChangelog[i];
-                        let creation = createTopic(topicMetadata, true);
+                    for(let i in changelog){
+                        let metadata = changelog[i];
+                        let creation = factory(metadata);//, true);
                         results.push(creation);
                     }
                     Promise.all(results)
@@ -241,38 +326,72 @@ module.exports = function(properties){
                     reject(err);
                 }
             });
-        });
+        });   
     }
 
-    function initTopics(){
-        return new Promise((resolve, reject)=>{
-            createTopic({topic:TOPIC_STORE_NAME, partitionsCount:1}, true)
-            .catch(errCreateTopic=>{
-                let code = errCreateTopic.code;
-                if(code && code === ERROR_TOPIC_ALREADY_EXISTS){
-                    loadTopics()
-                    .then(()=>resolve())
-                    .catch(err=>reject(err));
-                }else{
-                    reject(errCreateTopic);
-                }
-            })
-            .then(()=>{
-                loadTopics()
-                .then(()=>resolve())
-                .catch(err=>reject(err));
-            });
-        });
+    let loadTopics = function(){
+        return internalStoreLoader(TOPIC_STORE_NAME, (topicMetadata)=>createTopic(topicMetadata, true));
+        // return new Promise((resolve, reject)=>{
+        //     fetch({topic:TOPIC_STORE_NAME, partition:0, fetchOffset:0})
+        //     .then(readStream=>{
+        //         let recordsChunks = [];
+        //         readStream.on('data', function(d){ recordsChunks.push(d); });
+        //         readStream.on('end', function(){
+        //             let buf = Buffer.concat(recordsChunks);
+        //             let topicChangelog = JSON.parse(buf);
+        //             let results = [];
+        //             for(let i in topicChangelog){
+        //                 let topicMetadata = topicChangelog[i];
+        //                 let creation = createTopic(topicMetadata, true);
+        //                 results.push(creation);
+        //             }
+        //             Promise.all(results)
+        //             .catch(err=>reject(err))
+        //             .then(()=>resolve());
+        //         });
+        //     })
+        //     .catch(err=>{
+        //         if(err.code && err.code === "EONF"){
+        //             //do nothing we tried to fetch from a empty internal topic
+        //             console.log("Nothing to load from "+TOPIC_STORE_NAME)
+        //             resolve();
+        //         }else{
+        //             reject(err);
+        //         }
+        //     });
+        // });
     }
 
-    function init(){
+    let initTopics = function(){
+        return internalStoreInitializer(TOPIC_STORE_NAME, loadTopics);
+    }
+
+    let loadSubscriptions = function(){
+        return internalStoreLoader(SUBSCRIPTIONS_STORE_NAME, (metadata)=>subscribe(metadata, true));
+    }
+
+    let initSubscriptions = function(){
+        return internalStoreInitializer(SUBSCRIPTIONS_STORE_NAME, loadSubscriptions);
+    }
+
+    let init = function(){
         return new Promise((resolve, reject)=>{
             checkDataDirectory()
             .catch(err=>reject(err))
             .then(()=>{
+                // let initResults = [];
+                // initResults.push(initTopics());
+                // initResults.push(initSubscriptions());
+                // Promise.all(initResults)
                 initTopics()
                 .then(()=>{
-                    resolve();
+                    console.log("Topics: "+JSON.stringify(topicsPool));
+                    initSubscriptions()
+                    .then(()=>{
+                        console.log("Subscriptions: "+JSON.stringify(subscriptions));
+                        resolve();
+                    })
+                    .catch(err=>reject(err));
                 })
                 .catch(err=>reject(err));
             });
@@ -283,7 +402,8 @@ module.exports = function(properties){
         init,
         createTopic,
         produce,
-        fetch
+        fetch,
+        subscribe
     };
 
 }
