@@ -19,12 +19,15 @@
     // produce -> getTopic().getPartition().activeSegment().append(message)
 
 const fs = require('fs');
-const mergeStream = require("merge-stream");
+// const mergeStream = require("merge-stream");
 
 const partitionFactory = require('./commitlog/partition');
-const recordsParser = require('./commitlog/record').jsonParser;
 const fetchTransformStreamFactory = require('./commitlog/fetchTransformStream');
+const fetchTransformFactory = require('./commitlog/fetch').fetchTransformFactory;
 const constants = require('./constants');
+
+const utils = require('./utils');
+const checkDirectory = utils.checkDirectory;
 
 const AUTO_COMMIT_POLICY = "AUTO_COMMIT";
 const MANUAL_COMMIT_POLICY = "MANUAL_COMMIT";
@@ -122,13 +125,14 @@ module.exports = function(properties){
                     return;
                 }
                 if(partition == null){
+                    //TODO round robin to load balance producers in partitions
                     let min = 0;
                     let max = topicObj.partitions.length;
                     partition = Math.floor(Math.random() * (max - min) ) + min;
                 }
                 topicObj.partitions[partition].append(message)
-                .then((result)=>{
-                    resolve(result);
+                .then(({offset})=>{
+                    resolve({offset, topic, partition});
                 })
                 .catch((err)=>{
                     reject(err);
@@ -170,7 +174,7 @@ module.exports = function(properties){
                 }
                 topicObj.partitions[partition].read(fetchOffset, maxBytes)
                 .then((recordsStream)=>{
-                    let fetchTransform = fetchTransformStreamFactory();
+                    let fetchTransform = fetchTransformFactory();
                     resolve(recordsStream.pipe(fetchTransform));
                 })
                 .catch((err)=>{
@@ -332,44 +336,6 @@ module.exports = function(properties){
         });
     }
 
-    function createDataDirectory(){
-        return new Promise((resolve,reject)=>{
-            fs.mkdir(DATA_PATH,(mkdirErr)=>{
-                if(mkdirErr){
-                    reject(mkdirErr);
-                    return;
-                }
-                fs.open(DATA_PATH, 'r', (err, fd) => {
-                    if(err){
-                        reject(err);
-                    }else{
-                        resolve();
-                    }
-                });
-            });
-        });
-    }
-
-    function checkDataDirectory(){
-        return new Promise((resolve,reject)=>{
-            fs.open(DATA_PATH, 'r', (err, fd) => {
-                if(err){
-                    if (err.code === 'ENOENT') {
-                        createDataDirectory()
-                        .then(()=>resolve())
-                        .catch(dirErr=>{
-                            reject(dirErr);
-                        });
-                    }else{
-                        reject(err);
-                    }
-                }else{
-                    resolve();
-                }
-            });
-        });
-    }
-
     let internalStoreInitializer = function(internalTopicName, loader){
         return new Promise((resolve, reject)=>{
             createTopic({topic:internalTopicName, partitionsCount:1}, true)
@@ -399,10 +365,10 @@ module.exports = function(properties){
                 readStream.on('data', function(d){ recordsChunks.push(d); });
                 readStream.on('end', function(){
                     let buf = Buffer.concat(recordsChunks);
-                    let changelog = JSON.parse(buf);
+                    let changelogRecords = JSON.parse(buf);
                     let results = [];
-                    for(let i in changelog){
-                        let metadata = changelog[i];
+                    for(let i in changelogRecords){
+                        let metadata = changelogRecords[i].payload;
                         let creation = factory(metadata);//, true);
                         results.push(creation);
                     }
@@ -414,7 +380,6 @@ module.exports = function(properties){
             .catch(err=>{
                 if(err.code && err.code === "EONF"){
                     //do nothing we tried to fetch from a empty internal topic
-                    console.log("Nothing to load from "+internalTopicName);
                     resolve();
                 }else{
                     reject(err);
@@ -425,35 +390,6 @@ module.exports = function(properties){
 
     let loadTopics = function(){
         return internalStoreLoader(TOPIC_STORE_NAME, (topicMetadata)=>createTopic(topicMetadata, true));
-        // return new Promise((resolve, reject)=>{
-        //     fetch({topic:TOPIC_STORE_NAME, partition:0, fetchOffset:0})
-        //     .then(readStream=>{
-        //         let recordsChunks = [];
-        //         readStream.on('data', function(d){ recordsChunks.push(d); });
-        //         readStream.on('end', function(){
-        //             let buf = Buffer.concat(recordsChunks);
-        //             let topicChangelog = JSON.parse(buf);
-        //             let results = [];
-        //             for(let i in topicChangelog){
-        //                 let topicMetadata = topicChangelog[i];
-        //                 let creation = createTopic(topicMetadata, true);
-        //                 results.push(creation);
-        //             }
-        //             Promise.all(results)
-        //             .catch(err=>reject(err))
-        //             .then(()=>resolve());
-        //         });
-        //     })
-        //     .catch(err=>{
-        //         if(err.code && err.code === "EONF"){
-        //             //do nothing we tried to fetch from a empty internal topic
-        //             console.log("Nothing to load from "+TOPIC_STORE_NAME)
-        //             resolve();
-        //         }else{
-        //             reject(err);
-        //         }
-        //     });
-        // });
     }
 
     let initTopics = function(){
@@ -470,7 +406,7 @@ module.exports = function(properties){
 
     let init = function(){
         return new Promise((resolve, reject)=>{
-            checkDataDirectory()
+            checkDirectory(DATA_PATH)
             .catch(err=>reject(err))
             .then(()=>{
                 // let initResults = [];
@@ -499,7 +435,6 @@ module.exports = function(properties){
         init,
         createTopic,
         produce,
-        read,
         fetch,
         subscribe
     };

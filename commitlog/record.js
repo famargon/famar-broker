@@ -63,7 +63,7 @@ let parser = function(buffer){
         }
         let payload = buffer.slice(position+HEADER_LENGTH, position+HEADER_LENGTH+size);
         records.push({
-            offset,
+            offset:offset.toNumber(),
             size,
             payload
         });
@@ -78,34 +78,34 @@ let parser = function(buffer){
     return result;
 }
 
-function parseRecords(data){
-    let buffer = Buffer.from(data);
-    let records = [];
-    let position = 0;
-    do{
-        let offset = new Int64(buffer.slice(position, position+OFFSET_LENGTH));
-        let size = buffer.readInt32BE(position+OFFSET_LENGTH);//lee 4bytes
-        let payload = buffer.slice(position+HEADER_LENGTH, position+HEADER_LENGTH+size);
-        records.push({
-            offset,
-            size,
-            payload
-        });
-        position = position + HEADER_LENGTH + size;
+// function parseRecords(data){
+//     let buffer = Buffer.from(data);
+//     let records = [];
+//     let position = 0;
+//     do{
+//         let offset = new Int64(buffer.slice(position, position+OFFSET_LENGTH));
+//         let size = buffer.readInt32BE(position+OFFSET_LENGTH);//lee 4bytes
+//         let payload = buffer.slice(position+HEADER_LENGTH, position+HEADER_LENGTH+size);
+//         records.push({
+//             offset,
+//             size,
+//             payload
+//         });
+//         position = position + HEADER_LENGTH + size;
         
-    }while(position<buffer.length);
+//     }while(position<buffer.length);
 
-    return records;
-}
+//     return records;
+// }
 
-let jsonParser = function(data) {
-    let records = parseRecords(data);
-    let json = [];
-    for(let i in records){
-        let record = records[i];
-        json.push(JSON.parse(record.payload.toString('utf8')));
-    }
-    return json;
-}
+// let jsonParser = function(data) {
+//     let records = parseRecords(data);
+//     let json = [];
+//     for(let i in records){
+//         let record = records[i];
+//         json.push(JSON.parse(record.payload.toString('utf8')));
+//     }
+//     return json;
+// }
 
-module.exports = {createRecord, parseRecords, jsonParser, parser}
+module.exports = {createRecord, parser}
