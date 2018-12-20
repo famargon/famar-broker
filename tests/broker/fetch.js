@@ -7,13 +7,7 @@ var broker = brokerFactory(properties);
 broker.init()
 .then(()=>{
     let topic = "topic1";
-    let partition;
-    if(process.argv[2] == null){
-        partition = 0;
-    }else{
-       partition = new Number(process.argv[2]); 
-    }
-    broker.fetch({topic, partition, fetchOffset:0, maxBytes:4096})
+    broker.fetch({consumerGroup:"test", consumerId:"test", topic})
     .then((readStream)=>{
         readStream.pipe(process.stdout);
         // var recordsChunks = [];

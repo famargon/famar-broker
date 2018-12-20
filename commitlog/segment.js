@@ -1,13 +1,13 @@
 var fs = require('fs');
 const indexFactory = require('./index');
-const constants = require("../constants");
+const {LOG_FILE_SUFFIX} = require("../constants");
 
 module.exports = function(path, baseOffset, maxSegmentBytes){
     if(maxSegmentBytes == null){
         maxSegmentBytes = 5000000; //5 MBytes
     }
 
-    const segmentFilePath = path+baseOffset+constants.LOG_FILE_SUFFIX;
+    const segmentFilePath = path+baseOffset+LOG_FILE_SUFFIX;
 
     let firstOffset = baseOffset;
     let nextOffset = baseOffset;

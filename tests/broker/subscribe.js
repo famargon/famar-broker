@@ -7,15 +7,13 @@ var broker = brokerFactory(properties);
 broker.init()
 .then(()=>{
     let topic = "topic1";
-    broker.createTopic({topic, partitionsCount:1, parameters:{maxSegmentBytes:5000000}})
-    .then(()=>{
-        console.log(topic+" created");
+    broker.subscribe({consumerGroup:"test", consumerId:"test", topic})
+    .then((res)=>{
+        console.log(res);
     })
     .catch((err)=>{
         console.error(err);
     });
-
-
 
 })
 .catch((err)=>{

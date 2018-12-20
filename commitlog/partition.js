@@ -4,8 +4,12 @@ const EventEmitter = require('events');
 const createDirectory = require('../utils').createDirectory;
 const segmentFactory = require('./segment');
 const createRecord = require('./record').createRecord;
-const constants = require("../constants");
+const {
+    INDEX_FILE_SUFFIX, 
+    LOG_FILE_SUFFIX
+} = require("../constants");
 
+//-opts: maxSegmentBytes, retention policy //TODO
 function partitionFactory (options){
 
     const topic = options.topic;
@@ -24,21 +28,21 @@ function partitionFactory (options){
                 }
                 for(let i in files){
                     let file = files[i];
-                    if(file.endsWith(constants.INDEX_FILE_SUFFIX)){
+                    if(file.endsWith(INDEX_FILE_SUFFIX)){
                         //check if corresponding log file exists
-                        let logFile = file.replace(constants.INDEX_FILE_SUFFIX, constants.LOG_FILE_SUFFIX);
+                        let logFile = file.replace(INDEX_FILE_SUFFIX, LOG_FILE_SUFFIX);
                         if(!files.includes(logFile)){
                             reject("Partition inconsistency, missing log file "+logFile);
                             return;
                         }
-                    }else if(file.endsWith(constants.LOG_FILE_SUFFIX)){
+                    }else if(file.endsWith(LOG_FILE_SUFFIX)){
                         //check existence of index file
-                        let indexFile = file.replace(constants.LOG_FILE_SUFFIX, constants.INDEX_FILE_SUFFIX);
+                        let indexFile = file.replace(LOG_FILE_SUFFIX, INDEX_FILE_SUFFIX);
                         if(!files.includes(indexFile)){
                             reject("Partition inconsistency, missing index file "+logFile);
                             return;
                         }
-                        var baseOffset = file.replace(constants.LOG_FILE_SUFFIX,"");//filename is base offset
+                        var baseOffset = file.replace(LOG_FILE_SUFFIX,"");//filename is base offset
                         var segment = segmentFactory(partitionPath, new Number(baseOffset), maxSegmentBytes)
                         segments.push(segment);
                     }
@@ -155,6 +159,10 @@ function partitionFactory (options){
         var record = createRecord(message);
         let segment = activeSegment();
         var offset = segment.getNextOffset();
+        if(offset === 9007199254740992){
+            reject({code:'EMOR', msg:'Maximum offset reached in this partition'});
+            return;
+        }
         record.setOffset(offset);
         segment.append(record.buffer())
         .then((position)=>{

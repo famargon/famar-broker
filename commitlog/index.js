@@ -1,6 +1,6 @@
 let fs = require('fs');
 let Int64 = require('node-int64')
-const constants = require("../constants");
+const {INDEX_FILE_SUFFIX} = require("../constants");
 const indexEntrySize = 8+8+4;
 const entryFactory = function(offset, position, size){
     //offset(8B)position(8B)size(4B)
@@ -17,7 +17,7 @@ const entryFactory = function(offset, position, size){
 
 const indexFactory = function(path, baseOffset){
 
-    const filePath = path+baseOffset+constants.INDEX_FILE_SUFFIX;
+    const filePath = path+baseOffset + INDEX_FILE_SUFFIX;
 
     const indexCache = {};
 
@@ -47,7 +47,10 @@ const indexFactory = function(path, baseOffset){
                     cache(offset, filePosition, size);
                     position = position + indexEntrySize;
                     segmentLength += size;
-                    lastOffset = offset;
+                    // sometimes the entries are written unordered in the index file
+                    // if(offset > lastOffset){
+                        lastOffset = offset;
+                    // }
                 }while(position<buffer.length);	  
                 let nextOffset = lastOffset + 1;  
                 resolve({segmentLength, nextOffset});

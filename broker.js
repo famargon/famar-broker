@@ -1,51 +1,31 @@
-    //broker
-    //-api :
-    //  create, delete. topic
-    //  produce
-    //  fetch(consume)
-    //  offset commit
-
-    //topics
-    //  partitions(log manager)
-    //      -segments
-    //      -active segment
-    //      -opts: maxSegmentBytes, retention policy //TODO
-
-    //segment
-    //  -append
-    //  -read
-
-
-    // produce -> getTopic().getPartition().activeSegment().append(message)
-
 const fs = require('fs');
 // const mergeStream = require("merge-stream");
 
 const partitionFactory = require('./commitlog/partition');
 const fetchTransformFactory = require('./commitlog/fetch').fetchTransformFactory;
-const constants = require('./constants');
 
-const utils = require('./utils');
-const checkDirectory = utils.checkDirectory;
+const {
+    DEFAULT_DATA_PATH,
+    AUTO_COMMIT_POLICY,
+    COMMIT_POLICIES,
+    ERROR_TOPIC_ALREADY_EXISTS,
+    ERROR_TOPIC_MISSING,
+    TOPIC_STORE_NAME,
+    SUBSCRIPTIONS_STORE_NAME,
+    COMMITS_STORE_NAME
+} = require('./constants');
 
-const AUTO_COMMIT_POLICY = "AUTO_COMMIT";
-const MANUAL_COMMIT_POLICY = "MANUAL_COMMIT";
-const COMMIT_POLICIES = [AUTO_COMMIT_POLICY, MANUAL_COMMIT_POLICY];
+const {checkDirectory} = require('./utils');
 
 module.exports = function(properties){
 
-    const DATA_PATH = properties.dataPath || constants.DEFAULT_DATA_PATH;
-    const TOPIC_STORE_NAME = "_topic_changelog";
-    const ERROR_TOPIC_MISSING = "ETM";
-    const ERROR_TOPIC_ALREADY_EXISTS = "ETAE";
+    const environment = properties.environment || 'dev';
+    const DATA_PATH = properties.dataPath || DEFAULT_DATA_PATH;
 
-    let topicsPool = {};
+    const topicsPool = {};
+    const subscriptions = {};
 
-    const SUBSCRIPTIONS_STORE_NAME = "_subscriptions_changelog";
-    const COMMITS_STORE_NAME = "_commits_changelog";
-    let subscriptions = {};
-
-    let createTopic = function({topic, partitionsCount, parameters}, internal){
+    const createTopic = function({topic, partitionsCount, parameters}, internal){
         return new Promise((resolve, reject)=>{
             if(topicsPool[topic]){
                 reject("Topic already exists");
@@ -162,7 +142,7 @@ module.exports = function(properties){
                 fetchOffset = new Number(fetchOffset);
             }
             if(maxBytes == null){
-                maxBytes = 4096;
+                maxBytes = 512000; //512KB
             }else{
                 maxBytes = new Number(maxBytes);
             }
@@ -186,9 +166,9 @@ module.exports = function(properties){
         });
     }
 
-    let commit = function(commitMetadata, cache){
+    let commit = function({consumerGroup, consumerId, topic, partition, offset}, cache, internal){
         cache = cache == null ? true : cache;
-        const {consumerGroup, consumerId, topic, partition, offset} = commitMetadata;
+        const commitMetadata = {consumerGroup, consumerId, topic, partition, offset};
         return new Promise((resolve, reject)=>{
             if(consumerGroup == null){
                 reject("ConsumerGroup is missing");
@@ -247,7 +227,17 @@ module.exports = function(properties){
             if(cache){
                 partitionAssigned.lastCommitedOffset = offset;
             }
-
+            if(internal){
+                resolve(commitMetadata);
+                return;
+            }
+            produce({topic:COMMITS_STORE_NAME, partition:0, message:Buffer.from(JSON.stringify(commitMetadata))})
+            .then(()=>{
+                resolve(commitMetadata);
+            })
+            .catch(err=>{
+                reject(err);
+            });
         });
     }
 
@@ -313,7 +303,8 @@ module.exports = function(properties){
                 if(group.commitPolicy === AUTO_COMMIT_POLICY){
                     readStream.on('end', ()=>{
                         fetchPartition.lastCommitedOffset = readStream.lastOffset;
-                        commit({consumerGroup, consumerId, topic, partition:fetchPartition.id, offset:readStream.lastOffset}, false);                        
+                        commit({consumerGroup, consumerId, topic, partition:fetchPartition.id, offset:readStream.lastOffset}, false)
+                        .catch(err=>console.error(err));
                     });
                 }
             })
@@ -339,6 +330,7 @@ module.exports = function(properties){
     }
 
     let subscribe = function(subscriptionMetadata, internal){
+        internal = internal == null ? false : internal;
         return new Promise((resolve,reject)=>{
             let {consumerGroup, consumerId, topic, commitPolicy} = subscriptionMetadata;
             if(consumerGroup == null){
@@ -375,7 +367,7 @@ module.exports = function(properties){
                 group = {commitPolicy, consumers:{}};
                 topicSubscriptions[consumerGroup] = group;
             }
-            if(group[consumerId] != null && !internal){
+            if(group.consumers[consumerId] != null && !internal){
                 reject("ConsumerId "+consumerId+" already has a subscription in this topic");
                 return;
             }
@@ -444,7 +436,7 @@ module.exports = function(properties){
                     let results = [];
                     for(let i in changelogRecords){
                         let metadata = changelogRecords[i].payload;
-                        let creation = factory(metadata);//, true);
+                        let creation = factory(metadata);
                         results.push(creation);
                     }
                     Promise.all(results)
@@ -480,7 +472,7 @@ module.exports = function(properties){
     }
 
     const loadCommits = function(){
-        return internalStoreLoader(COMMITS_STORE_NAME, (commitMetadata)=>commit(commitMetadata, true));
+        return internalStoreLoader(COMMITS_STORE_NAME, (commitMetadata)=>commit(commitMetadata, true, true));
     }
 
     const initCommits = function(){
@@ -491,45 +483,15 @@ module.exports = function(properties){
 
     let init = function(){
         return new Promise((resolve, reject)=>{
-            // checkDirectory(DATA_PATH)
-            // .catch(err=>reject(err))
-            // .then(()=>{
-            //     // let initResults = [];
-            //     // initResults.push(initTopics());
-            //     // initResults.push(initSubscriptions());
-            //     // Promise.all(initResults)
-            //     initTopics()
-            //     .then(()=>{
-            //         console.log("----------------------------------------------------");
-            //         console.log("Topics: "+JSON.stringify(topicsPool, 1, 2));
-            //         initSubscriptions()
-            //         .then(()=>{
-            //             console.log("----------------------------------------------------");
-            //             console.log("Subscriptions: "+JSON.stringify(subscriptions, 1, 2));
-            //             console.log("----------------------------------------------------");
-            //             resolve();
-            //         })
-            //         .catch(err=>reject(err));
-            //     })
-            //     .catch(err=>reject(err));
-
-            // });
-
-            let promises = [checkDataDirectory, initTopics, initSubscriptions, initCommits];
-
-
-            // console.log(promises.reduce((chain, task)=>{
-            //     chain().then(()=>task());
-            // }));
-
-            return promises.reduce((promiseChain, currentTask) => {
-                return promiseChain.then(chainResults =>
-                    currentTask().then(currentResult =>
-                        [ ...chainResults, currentResult ]
-                    )
-                );
-            }, Promise.resolve([]))
-            .then(arrayOfResults => {
+            //runs secuentialy this functions
+            [checkDataDirectory, 
+            initTopics, 
+            initSubscriptions, 
+            initCommits]
+            .reduce((prev,current)=>{
+                return prev.catch(err=>console.error(err)).then(()=>current());
+            },Promise.resolve())
+            .then(() => {
                     console.log("----------------------------------------------------");
                     console.log("Topics: "+JSON.stringify(topicsPool, 1, 2));
                     console.log("----------------------------------------------------");

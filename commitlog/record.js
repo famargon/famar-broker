@@ -1,12 +1,14 @@
-const constants = require("../constants");
 var Int64 = require('node-int64')
 //8+4+content.length
 //8 bytes para offset
 //4 bytes para tamaño payload
 //content.length para payload
-const OFFSET_LENGTH = constants.OFFSET_LENGTH;
-const SIZE_LENGTH = constants.SIZE_LENGTH;
-const HEADER_LENGTH = constants.HEADER_LENGTH;
+const {
+    OFFSET_LENGTH, 
+    SIZE_LENGTH, 
+    HEADER_LENGTH
+} = require("../constants");
+
 //content es un buffer
 function createRecord(content){
 
