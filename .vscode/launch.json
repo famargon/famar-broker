@@ -1,5 +1,5 @@
 {
-    // Utilizar IntelliSense para aprender acerca de los posibles atributos.
+    // Use IntelliSense para saber los atributos posibles.
     // Mantenga el puntero para ver las descripciones de los existentes atributos 
     // Para más información, visite: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
@@ -7,14 +7,8 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Test server",
-            "program": "${workspaceFolder}/server.js"
-        },
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "Test broker",
-            "program": "${workspaceFolder}/tests/broker/fetch.js",
+            "name": "Launch Program",
+            "program": "${workspaceFolder}\\server.js"
         }
     ]
 }

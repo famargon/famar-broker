@@ -1,6 +1,7 @@
 const fs = require('fs');
 const EventEmitter = require('events');
 
+const createDirectory = require('../utils').createDirectory;
 const segmentFactory = require('./segment');
 const createRecord = require('./record').createRecord;
 const constants = require("../constants");
@@ -14,52 +15,7 @@ function partitionFactory (options){
 
     let segments = [];
 
-    function activeSegment(){
-        return segments[segments.length-1];
-    }
-
-    //choose the segments that stores the record with fetchOffset
-    function chooseSegment(fetchOffset) {
-        let choosen;
-        for(let i in segments){
-            let segment = segments[i];
-            if(fetchOffset >= segment.firstOffset){
-                choosen = segment;
-            }else{
-                break;
-            }
-        }
-        return choosen;
-    }
-
-    function validateOptions(resolve,reject){
-        if(!partitionPath){
-            reject("Partition path is missing");
-        }
-        if(partitionPath.length==0){
-            reject("Partition path is empty");
-        }
-    }
-
-    function createPartitionDirectory(){
-        return new Promise((resolve,reject)=>{
-            fs.mkdir(partitionPath,(mkdirErr)=>{
-                if(mkdirErr){
-                    reject(mkdirErr);
-                    return;
-                }
-                fs.open(partitionPath, 'r', (err, fd) => {
-                    if(err){
-                        reject(err);
-                    }else{
-                        resolve();
-                    }
-                });
-            });
-        });
-    }
-
-    function loadSegments(){
+    const loadSegments = function(){
         return new Promise((resolve,reject)=>{
             fs.readdir(partitionPath, (err, files) => {
                 if(err){
@@ -104,7 +60,7 @@ function partitionFactory (options){
         });
     }
 
-    function load(resolve, reject){
+    const load = function(resolve, reject){
         loadSegments()
         .then(()=>{
             let initResults = [];
@@ -125,13 +81,18 @@ function partitionFactory (options){
         })
     }
 
-    function init(){
+    const init = function(){
         return new Promise((resolve,reject)=>{
-            validateOptions(resolve,reject);
+            if(!partitionPath){
+                reject("Partition path is missing");
+            }
+            if(partitionPath.length==0){
+                reject("Partition path is empty");
+            }
             fs.open(partitionPath, 'r', (err, fd) => {
                 if (err) {
                     if (err.code === 'ENOENT') {
-                        createPartitionDirectory()
+                        createDirectory(partitionPath)
                         .then(()=>load(resolve,reject))
                         .catch(dirErr=>reject(dirErr));
                     }else{
@@ -144,10 +105,14 @@ function partitionFactory (options){
         });
     }
 
+    const activeSegment = function(){
+        return segments[segments.length-1];
+    }
+
     let swapping = false;
     const coordinator = new EventEmitter().setMaxListeners(0);
     
-    function checkAndSwapSegment(){
+    const checkAndSwapSegment = function(){
         return new Promise((resolve,reject)=>{
             let active = activeSegment();
             if(active.needsSwap()){
@@ -186,7 +151,7 @@ function partitionFactory (options){
         });
     }
 
-    let internalAppend = function(resolve, reject, message){
+    const internalAppend = function(resolve, reject, message){
         var record = createRecord(message);
         let segment = activeSegment();
         var offset = segment.getNextOffset();
@@ -201,7 +166,7 @@ function partitionFactory (options){
         });
     }
 
-    function append(message){
+    const append = function(message){
         return new Promise((resolve, reject)=>{
             let active = activeSegment();
             if(active.needsSwap()){
@@ -216,6 +181,20 @@ function partitionFactory (options){
                 internalAppend(resolve, reject, message);
             }
         });
+    }
+
+    //choose the segments that stores the record with fetchOffset
+    const chooseSegment = function(fetchOffset) {
+        let choosen;
+        for(let i in segments){
+            let segment = segments[i];
+            if(fetchOffset >= segment.firstOffset){
+                choosen = segment;
+            }else{
+                break;
+            }
+        }
+        return choosen;
     }
 
     let read = function(fetchOffset, maxBytes){
@@ -237,6 +216,7 @@ function partitionFactory (options){
     }
 
     return {
+        id: partitionId,
         init,
         append,
         read

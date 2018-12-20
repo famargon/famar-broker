@@ -22,7 +22,6 @@ const fs = require('fs');
 // const mergeStream = require("merge-stream");
 
 const partitionFactory = require('./commitlog/partition');
-const fetchTransformStreamFactory = require('./commitlog/fetchTransformStream');
 const fetchTransformFactory = require('./commitlog/fetch').fetchTransformFactory;
 const constants = require('./constants');
 
@@ -43,6 +42,7 @@ module.exports = function(properties){
     let topicsPool = {};
 
     const SUBSCRIPTIONS_STORE_NAME = "_subscriptions_changelog";
+    const COMMITS_STORE_NAME = "_commits_changelog";
     let subscriptions = {};
 
     let createTopic = function({topic, partitionsCount, parameters}, internal){
@@ -186,6 +186,71 @@ module.exports = function(properties){
         });
     }
 
+    let commit = function(commitMetadata, cache){
+        cache = cache == null ? true : cache;
+        const {consumerGroup, consumerId, topic, partition, offset} = commitMetadata;
+        return new Promise((resolve, reject)=>{
+            if(consumerGroup == null){
+                reject("ConsumerGroup is missing");
+                return;
+            }
+            if(consumerId == null){
+                reject("ConsumerId is missing");
+                return;
+            }
+            if(topic == null){
+                reject("Topic is missing");
+                return;
+            }
+            if(partition == null){
+                reject("partition is missing");
+                return;
+            }
+            if(offset == null){
+                reject("offset is missing");
+                return;
+            }
+            var topicObj = topicsPool[topic];
+            if(topicObj == null){
+                reject("Topic "+topic+" doesn't exists");
+                return;
+            }
+            if(topicObj.partitions[partition] == null){
+                reject("Partition "+partition+" doesn't exists in topic "+topic);
+                return;
+            }
+            let topicSubscriptions = subscriptions[topic];
+            if(topicSubscriptions == null){
+                reject("Topic subscription not found");
+                return;
+            }
+            let group = topicSubscriptions[consumerGroup];
+            if(group == null){
+                reject("Consumer group not found");
+                return;
+            }
+            let subscriptionMetadata = group.consumers[consumerId];
+            if(subscriptionMetadata == null){
+                reject("Consumer id not found");
+                return;
+            }
+            let assignedPartitions = subscriptionMetadata.assignedPartitions;
+            if(assignedPartitions == null){
+                reject("Consumer has no assigned partitions on this topic");
+                return;
+            }
+            let partitionAssigned = assignedPartitions[partition];
+            if(partitionAssigned == null){
+                reject("consumer "+consumerId+" is not assigned to partition "+partition);
+                return;
+            }
+            if(cache){
+                partitionAssigned.lastCommitedOffset = offset;
+            }
+
+        });
+    }
+
     let fetch = function({consumerGroup, consumerId, topic, maxFetchBytes}){
         return new Promise((resolve,reject)=>{
             if(consumerGroup == null){
@@ -238,17 +303,27 @@ module.exports = function(properties){
             let lastCommitedOffset = fetchPartition.lastCommitedOffset;
             if(lastCommitedOffset == null){
                 lastCommitedOffset = 0;
+            }else{
+                lastCommitedOffset++;
             }
 
             read({topic, partition:fetchPartition.id, fetchOffset:lastCommitedOffset, maxFetchBytes})
             .then(readStream=>{
                 resolve(readStream);
                 if(group.commitPolicy === AUTO_COMMIT_POLICY){
-                    //TODO
-                    // fetchPartition.lastCommitedOffset
+                    readStream.on('end', ()=>{
+                        fetchPartition.lastCommitedOffset = readStream.lastOffset;
+                        commit({consumerGroup, consumerId, topic, partition:fetchPartition.id, offset:readStream.lastOffset}, false);                        
+                    });
                 }
             })
-            .catch(err=>reject(err));
+            .catch(err=>{
+                if(err.code && err.code === 'EONF' && lastCommitedOffset === 0){
+                    reject([]);
+                }else{
+                    reject(err);
+                }
+            });
 
             // let readResults = [];
             // for(let partition in assignedPartitions){
@@ -388,46 +463,81 @@ module.exports = function(properties){
         });   
     }
 
-    let loadTopics = function(){
+    const loadTopics = function(){
         return internalStoreLoader(TOPIC_STORE_NAME, (topicMetadata)=>createTopic(topicMetadata, true));
     }
 
-    let initTopics = function(){
+    const initTopics = function(){
         return internalStoreInitializer(TOPIC_STORE_NAME, loadTopics);
     }
 
-    let loadSubscriptions = function(){
+    const loadSubscriptions = function(){
         return internalStoreLoader(SUBSCRIPTIONS_STORE_NAME, (metadata)=>subscribe(metadata, true));
     }
 
-    let initSubscriptions = function(){
+    const initSubscriptions = function(){
         return internalStoreInitializer(SUBSCRIPTIONS_STORE_NAME, loadSubscriptions);
     }
 
+    const loadCommits = function(){
+        return internalStoreLoader(COMMITS_STORE_NAME, (commitMetadata)=>commit(commitMetadata, true));
+    }
+
+    const initCommits = function(){
+        return internalStoreInitializer(COMMITS_STORE_NAME, loadCommits);
+    }
+
+    const checkDataDirectory = ()=>checkDirectory(DATA_PATH);
+
     let init = function(){
         return new Promise((resolve, reject)=>{
-            checkDirectory(DATA_PATH)
-            .catch(err=>reject(err))
-            .then(()=>{
-                // let initResults = [];
-                // initResults.push(initTopics());
-                // initResults.push(initSubscriptions());
-                // Promise.all(initResults)
-                initTopics()
-                .then(()=>{
+            // checkDirectory(DATA_PATH)
+            // .catch(err=>reject(err))
+            // .then(()=>{
+            //     // let initResults = [];
+            //     // initResults.push(initTopics());
+            //     // initResults.push(initSubscriptions());
+            //     // Promise.all(initResults)
+            //     initTopics()
+            //     .then(()=>{
+            //         console.log("----------------------------------------------------");
+            //         console.log("Topics: "+JSON.stringify(topicsPool, 1, 2));
+            //         initSubscriptions()
+            //         .then(()=>{
+            //             console.log("----------------------------------------------------");
+            //             console.log("Subscriptions: "+JSON.stringify(subscriptions, 1, 2));
+            //             console.log("----------------------------------------------------");
+            //             resolve();
+            //         })
+            //         .catch(err=>reject(err));
+            //     })
+            //     .catch(err=>reject(err));
+
+            // });
+
+            let promises = [checkDataDirectory, initTopics, initSubscriptions, initCommits];
+
+
+            // console.log(promises.reduce((chain, task)=>{
+            //     chain().then(()=>task());
+            // }));
+
+            return promises.reduce((promiseChain, currentTask) => {
+                return promiseChain.then(chainResults =>
+                    currentTask().then(currentResult =>
+                        [ ...chainResults, currentResult ]
+                    )
+                );
+            }, Promise.resolve([]))
+            .then(arrayOfResults => {
                     console.log("----------------------------------------------------");
                     console.log("Topics: "+JSON.stringify(topicsPool, 1, 2));
-                    initSubscriptions()
-                    .then(()=>{
-                        console.log("----------------------------------------------------");
-                        console.log("Subscriptions: "+JSON.stringify(subscriptions, 1, 2));
-                        console.log("----------------------------------------------------");
-                        resolve();
-                    })
-                    .catch(err=>reject(err));
-                })
-                .catch(err=>reject(err));
-            });
+                    console.log("----------------------------------------------------");
+                    console.log("Subscriptions: "+JSON.stringify(subscriptions, 1, 2));
+                    console.log("----------------------------------------------------");
+                    resolve();
+            })
+            .catch(err=>reject(err));
         });
     }
 

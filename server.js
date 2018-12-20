@@ -7,7 +7,7 @@ const broker = brokerFactory(properties);
 
 const app = express();
 
-app.use('/produce/', bodyParser.raw({type:'application/json'}));
+app.use('/produce/', bodyParser.raw({type:['application/json','json']}));
 app.post('/produce/:topic', (req,res)=>{
     let partition = req.headers['partition'];
     broker.produce({topic:req.params.topic, partition, message:req.body})

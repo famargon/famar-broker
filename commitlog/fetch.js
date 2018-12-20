@@ -7,7 +7,6 @@ let fetchTransformFactory = function(){
     const incompleteChunks = [];
 
     const recordsToJson = new Transform({
-        // writableObjectMode: true,
 
         transform(chunk,encoding, callback){
             if(first){
@@ -36,6 +35,7 @@ let fetchTransformFactory = function(){
                         this.push(',');
                     }
                     let recordToPush = "{\"offset\":"+record.offset+", \"payload\":"+record.payload.toString()+"}";
+                    this.lastOffset = record.offset;
                     this.push(recordToPush);
                 }
             }

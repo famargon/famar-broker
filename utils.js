@@ -38,4 +38,5 @@ const checkDirectory = function(path){
     });
 }
 
+module.exports.createDirectory = createDirectory;
 module.exports.checkDirectory = checkDirectory;
